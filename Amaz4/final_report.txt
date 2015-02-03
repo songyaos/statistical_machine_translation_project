@@ -1,0 +1,188 @@
+*******************************************************************
+										
+			CMPT 413 NLP Final Project										     	
+			Group	: Amaz4				     	     
+			Members	: Rao Fu, Yongyi Wu 			      
+				   	  Song Yao, Zhelun Wu, An Yu			
+										
+********************************************************************
+
+
+Motivation
+__________
+
+Our translation system is based on the decoder and reranker assignment. We choose to imporve the aspect of tuning the weights for each feature since we have a large training data. The weight is to combine every feature into one score for decoding. The reason why we choose to tuning the weights is that we can use machine learning method to train weights and need not to change much code in decoder code. Good weights can results in a good translation.
+
+
+
+Approach 
+________
+
+=== General introduction of the approach ===
+
+According to the book of statistical machine translation, we face two kinds of errors in decoding. The first kind of error is search error and the second kind of error is model error. In this project, our log-linear model is fixed. So we do not consider the model error. We try to get a low search error by using beam search. Beam search is a kind of heuristic search algorithm. In beam search, we prune the stack to a fixed size to reduce the search space. We may lose the best translation candidate in the pruning process, but it is too expensive to search all possible candidates.
+
+The whole translation framework can be outlined as follows: 
+
+	1. initialize the feature weights. 
+
+	2. generate the nbest candidates based on the current weights. 
+
+	3. rerank the weights with the candidates by using perceptron learning algorithm. 
+
+	4. after several iterations of step 2 and 3, compute the final output with the current weight.
+
+The key algorithms used in the process are beam search algorithm and perceptron learning. The model is the phrase based translation model.
+
+A detailed explanation of each component is given below: 
+
+=== 1. Nbest Decoding ===
+
+In nbest decoding, we do not select the best translation candidate from the decoding output, instead, we output a top list of candidates. These candidates are then sent to the reranking algorithm to compute a better weight for each feature. To generate the correct format nbest candidate file, we need to calculate the features for each candidate translation. We use the four default features given in the phrase translation model file. The four features are as follows: p(f|e): the inverse phrase translation probability lex(f|e): the inverse lexical weighting p(e|f): the direct phrase translation probability lex(e|f): the direct lexical weighting
+
+The decoding model: our phrase based model can be written as follows: e = argmax_e \sum_a Pr_tm(f,a|e)*Pr_lm(e)
+
+This above model equivalent to the following model in our project: e =argmax_e exp( w1* sum (log(f1)) + w2 * sum (log(f2)) + w3 * sum (log (f3)) + w4 * sum (log (f4)) + w5 * sum (log (f5)) where f1, f2, f3 and f4 are the four features mentioned above. f5 is the language model. w5 is always 1. We are trying to learn the weight = [w1,w2,w3,w4]. The translation model score is calculated as follows: phrase_pair_score = sum(dot(weight,feature))
+
+=== 2. Reranking ===
+==== Perceptron learning to update feature weights ==== 
+To generate a new weight vector based on the current candidates, we use the perceptron learning algorithm. The basic procedure of the algorithm can be written as follows: if weight * (f1 - f2) <= 0 : weight += eta * (f1 - f2)
+
+Here f1-f2 the difference between two different feature vectors, eta is the learning rate. We assume the candidate 1 is a better translation than candidate 2.
+
+The rationale of this update is as follows: if candidate 1 is better than candidate 2, it should have a higher score. Then we should have weight*f1 > weight*f2 If we get the opposite result, we should adjust the weight based on the feature difference f1-f2.
+
+=== 3. Final Decoding ===
+After several iterations of reranking and nbest decoding, we will get a better weight vector. Then based on this weight vector, we can carry out the final decoding algorithm. In this decoding process, we select the best translation output of each Chinese sentence. The iteration process is shown as below: w0 -> candidate_list0 -> w1 -> candidate_list1 -> w2 -> candidate_list2 -> ….. -> w_final -> best_output
+
+
+Data 
+____
+
+large/phrase-table/test-filtered/rules_cnt.final.out as phrase table in decoder en.gigaword.3g.filtered.train_dev_test.arpa.gz as language model in decoder
+
+To training the weights, we use: large/phrase-table/dev-filtered/rules_cnt.final.out as phrase table in decoder for generating 100-best list dev/all.cn-en.cn as input file for decoder to generate 100-best list dev/all.cn-en.en0 to dev/all.cn-en.en3 as reference for reranker to train the weights
+
+To calculate the BLEU score, we use the reference in test folder: from test/all.cn-en.en0 to test/all.cn-en.en3
+
+Considering the running time, we decide to use the subset of dev/all.cn-en.cn to tune the weights. And than we the test/all.cn-en.cn with the trained weights using decoder to get the translation.
+
+
+Code 
+____
+
+=== 1. Decoder ===
+
+==== Rough Ideas ====
+
+Mainly using the code from Homework 4 Decoder, we applied a heuristic search using hypothesis stacks. The worst hypothesises in the stack will be pruned out if the stack gets too large. In that case, since we drop the worst hypothesis and ignore all future expansion early, the search space of the whole problem is reduced and time complexity is decreased.
+
+==== Used Files ====
+
+decoder.py : The code we used in HW4 Decoder, basically translate the Chinese sentences to English according to the given translation model and language model.
+
+training_decoder.py : Similar to decoder.py, but the output of decoder.py is the English text while this code provide us with the nbest_list file for training.
+
+models_gz.py : Also modified from the code(models.py) of HW4 Decoder, it is extended to be able to open .gz files as the model's language model and translation model.
+
+=== 2. Reranker ===
+
+==== Used Files ====
+
+perc_reranker.py : the code we used in HW5 Reranker. Option -n is for nbest_list file generated by training_decoder.py and option -r is for the reference in /dev. The output is the weights vector for the features. Specifically, the number of features is 4.
+
+score-reranker.py : The code provided in HW5 Reranker. The inputs are reference and the translate outcome we generated using decoder.py. The output is the BLEU score.
+
+
+Results
+_______
+
+
+=== Baseline ===
+Uniform weights for the four features. s = 100, k = 5.
+
+Translation Model: /large/phrase-table/dev-filtered/rules_cnt.final.out
+
+Language Model: /lm/en.gigaword.3g.filtered.dev_test.arpa.gz
+
+Input Chinese file: /test/all.cn-en.cn
+
+Reference file: /test/all.cn-en.en[0-3]
+
+without training decoder score :
+
+BLEU Scores:
+
+Ref01: 0.0509923250077 
+Ref02: 0.0416190162899 
+Ref03: 0.0508320309551 
+Ref04: 0.0443422168128
+
+=== Improvment ===
+
+* Training using training_decoder.py:
+
+Training Data: /dev/all.cn-en.cn
+
+Translation model: /large/phrase-table/dev-filtered/rules_cnt.final.out
+
+Language Model: /lm/en.gigaword.3g.filtered.dev_test.arpa.gz
+
+Reference Files: /dev/all.cn-en.en0
+
+* Decode test files:
+
+Training Data: /test/all.cn-en.cn
+
+Translation model: /large/phrase-table/test-filtered/rules_cnt.final.out
+
+Language Model: /lm/en.gigaword.3g.filtered.dev_test.arpa.gz
+
+Reference Files: /test/all.cn-en.en0 
+
+BLEU Scores:
+
+iteration 1: 0.056699795624
+
+iteration 2: 0.048679981864
+
+* The Best Score we get
+	* Training using training_decoder.py:
+
+	Training Data: Use the first 500 sentences in /dev/all.cn-en.cn
+
+	Translation model: /large/phrase-table/dev-filtered/rules_cnt.final.out
+
+	Language Model: /lm/en.gigaword.3g.filtered.dev_test.arpa.gz
+
+	* Decode test files:
+
+	Training Data: /test/all.cn-en.cn
+
+	Translation model: /large/phrase-table/test-filtered/rules_cnt.final.out
+
+	Language Model: /lm/en.gigaword.3g.filtered.dev_test.arpa.gz
+
+	Reference Files: /test/all.cn-en.en0 
+
+BLEU Scores:
+
+iteration 1: 0.043026514098
+
+iteration 2: 0.0628780361727
+
+* When we add another feature language model score, the final BLEU Score is:
+
+iteration 1: 0.0437621256836
+
+Future Work
+___________
+
+We expect to improve the performance of SMT from the following aspects. 
+
+We will try to enhance the performance by handling unknown Chinese words. According to [1], implementing named entity translation before using subword-based translation and re-split the unkown words into sub-words with subwords translation model will greatly improve the performance. Currently, we are using phrase-based decoding for our SMT. Therefore, when there are words not in the translation model or unseen words, our decoder just ignores and removes them. This will lower the translation quality when there are many unkown words in the dataset which is a common case in Chinese translation. In [1], it provides a statistics-based method to translate unkown words which is composed of NER and subword CWS methods. NER defines four kinds of entities, which are people names, organization names, location names and numerical expressions as well as three sorts of states, which are the first character of an entity, other than the first character of an entity and isolated character. If unkown words do not belong to any of these four entities, then it divides the long sequence into smaller subsequences and translates them with small-size dictionary for frequent words, and then looks for these translated segmentations in large-size dictionary. This will sufficiently avoid the separation between, for example, names and accurately segment long unkown sequence of words.
+
+Moreover, we want to increase the number of features from five to eight or more. As our result shows, more features tend to contribute to the performance. In addition, we will redesign the data structures so that it is able to implement the large samples within a relatively shortter period. 
+
+
+[1] Zhang R. & Sumita E. (2008). Chinese Unknown Word Translation by Subword Re-segmentation.
